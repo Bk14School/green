@@ -197,6 +197,10 @@ body{background:#0a0a0a;font-family:'Sarabun',sans-serif;overflow:hidden;height:
     <div class="hud-chip hud-score">⭐ <span id="scoreDisp">0</span></div>
     <div class="hud-timer" id="timerDisp">30</div>
     <div class="hud-chip hud-combo">🔥 <span id="comboDisp">0</span></div>
+    <div id="grabStatus" style="position:absolute;top:65px;left:50%;transform:translateX(-50%);
+         font-size:12px;font-weight:700;color:rgba(255,255,255,.6);pointer-events:none;
+         background:rgba(0,0,0,.4);padding:4px 12px;border-radius:100px;backdrop-filter:blur(4px);
+         display:none;"></div>
   </div>
 
   <!-- Combo area -->
@@ -272,10 +276,16 @@ let nextId    = 0;
 // Hand state
 let handX = -999, handY = -999;   // normalized 0-1
 let handLandmarks = null;         // เก็บ landmarks ทั้ง 21 จุด
-let isGrabbing   = false;         // fist = true
-let wasGrabbing  = false;
-let heldItem     = null;          // item currently held by hand
-let handVisible  = false;
+let isGrabbing      = false;   // fist detected
+let wasGrabbing     = false;   // previous frame
+let grabConfirm     = 0;       // ต้องกำติดต่อกัน N frames จึง trigger
+let openConfirm     = 0;       // ต้องเปิดติดต่อกัน N frames จึง release
+const GRAB_FRAMES   = 3;       // กำ 3 frames ติดต่อกัน = grab
+const OPEN_FRAMES   = 2;       // เปิด 2 frames ติดต่อกัน = release
+let heldItem        = null;    // item ที่ถืออยู่
+let handVisible     = false;
+let handLostFrames  = 0;       // นับ frame ที่มือหาย
+const MAX_LOST      = 8;       // ยอมให้มือหายได้ 8 frames ก่อน force release
 let showSkeleton = true;          // toggle แสดง skeleton
 
 const canvas = document.getElementById('gameCanvas');
@@ -348,13 +358,19 @@ function setLoad(pct,msg){
 // ================================================================
 function onHandResults(results){
   if(!results.multiHandLandmarks || results.multiHandLandmarks.length===0){
-    handVisible=false; handLandmarks=null; cursor.style.display='none';
-    if(heldItem){heldItem=null;}
+    handLostFrames++;
+    if(handLostFrames >= MAX_LOST){
+      // มือหายนานเกิน → force release
+      handVisible=false; handLandmarks=null; cursor.style.display='none';
+      if(heldItem){ releaseItem(heldItem); heldItem=null; }
+      grabConfirm=0; openConfirm=0; isGrabbing=false; wasGrabbing=false;
+    }
     return;
   }
-  handVisible   = true;
-  const lm      = results.multiHandLandmarks[0];
-  handLandmarks = lm;   // เก็บไว้วาด skeleton
+  handVisible    = true;
+  handLostFrames = 0;   // reset lost counter
+  const lm       = results.multiHandLandmarks[0];
+  handLandmarks  = lm;
 
   // ใช้ landmark 9 (กลางมือ) เป็น cursor position
   // x ต้อง flip (1-x) เพราะ video ถูก mirror ด้วย CSS scaleX(-1)
@@ -514,36 +530,55 @@ function loop(){
   const CY = handY * canvas.height;
   const BIN_Y = canvas.height - 85;
 
-  // --- Grab / Release logic ---
+  // --- Grab / Release logic (debounced) ---
   if(handVisible){
-    if(isGrabbing && !wasGrabbing){
-      // กำมือ: หยิบ item ที่อยู่ใกล้ cursor
-      if(!heldItem){
-        const HIT = Math.max(60, canvas.width*.1);
-        const hit = [...gameItems].reverse().find(gi=>{
-          if(gi.removing||gi.held) return false;
-          return Math.hypot(gi.x-CX, gi.y-CY)<HIT;
-        });
-        if(hit){ heldItem=hit; hit.held=true; }
+    if(isGrabbing){
+      grabConfirm++;
+      openConfirm = 0;
+    } else {
+      openConfirm++;
+      grabConfirm = 0;
+    }
+
+    // GRAB: กำครบ GRAB_FRAMES และยังไม่ได้ถือของ
+    if(grabConfirm === GRAB_FRAMES && !heldItem){
+      const HIT = Math.max(70, canvas.width * 0.12);
+      const hit = [...gameItems].reverse().find(gi => {
+        if(gi.removing || gi.held || gi._done) return false;
+        return Math.hypot(gi.x - CX, gi.y - CY) < HIT;
+      });
+      if(hit){
+        heldItem      = hit;
+        hit.held      = true;
+        hit.vx        = 0;
+        hit.vy        = 0;
       }
     }
-    if(!isGrabbing && wasGrabbing){
-      // เปิดมือ: วาง item
-      if(heldItem){
-        const bin=getBinAt(CX,CY,BIN_Y);
-        if(bin) dropItem(heldItem,bin);
-        else    releaseItem(heldItem);
-        heldItem=null;
-      }
+
+    // RELEASE: เปิดมือครบ OPEN_FRAMES และมีของอยู่ในมือ
+    if(openConfirm === OPEN_FRAMES && heldItem){
+      const bin = getBinAt(CX, CY, BIN_Y);
+      if(bin){ dropItem(heldItem, bin); }
+      else   { releaseItem(heldItem); }
+      heldItem = null;
     }
-    wasGrabbing=isGrabbing;
+
+    // Safety: ถ้า heldItem ถูกลบจาก array แล้ว (removing) ให้ clear
+    if(heldItem && (heldItem._done || heldItem.removing)){
+      heldItem = null;
+    }
+
+    wasGrabbing = isGrabbing;
+  } else if(handLostFrames < MAX_LOST && heldItem){
+    // มือหายชั่วคราว — ยังถือของไว้ก่อน แค่หยุดเลื่อน
   }
 
   // --- Move held item ---
-  if(heldItem && handVisible){
-    heldItem.x += (CX - heldItem.x) * .4;
-    heldItem.y += (CY-30 - heldItem.y) * .4;
-    heldItem.vy=0; heldItem.vx=0;
+  if(heldItem && handVisible && handLostFrames === 0){
+    heldItem.x  += (CX - heldItem.x) * 0.5;
+    heldItem.y  += (CY - 40 - heldItem.y) * 0.5;
+    heldItem.vy  = 0;
+    heldItem.vx  = 0;
   }
 
   // --- Update items ---
@@ -755,8 +790,12 @@ function getBinAt(x,y,binY){
 }
 
 function dropItem(gi,binName){
-  gi.held=false; gi.removing=true;
-  if(heldItem===gi) heldItem=null;
+  gi.held      = false;
+  gi.removing  = true;
+  gi.vx = 0; gi.vy = 0;
+  heldItem     = null;
+  grabConfirm  = 0;
+  openConfirm  = 0;
   const correct=gi.item.b===binName;
   if(correct){
     combo++; ok++;
@@ -772,14 +811,23 @@ function dropItem(gi,binName){
 }
 
 function releaseItem(gi){
-  gi.held=false;
-  gi.vy=GAME_CONFIG.spd*1.8;
-  gi.vx=(Math.random()-.5)*2;
+  if(!gi) return;
+  gi.held     = false;
+  gi.vy       = GAME_CONFIG.spd * 1.8;
+  gi.vx       = (Math.random() - 0.5) * 2;
+  grabConfirm = 0;
+  openConfirm = 0;
+  if(heldItem === gi) heldItem = null;
 }
 
 function missItem(gi){
-  gi.removing=true; gi.held=false;
-  if(heldItem===gi) heldItem=null;
+  gi.removing = true;
+  gi.held     = false;
+  if(heldItem === gi){
+    heldItem    = null;
+    grabConfirm = 0;
+    openConfirm = 0;
+  }
   fail++; combo=0; score=Math.max(0,score-3);
   showPop(gi.x,gi.y,'💨 พลาด','rgba(255,255,255,.5)');
 }
@@ -790,6 +838,19 @@ function missItem(gi){
 function updateHUD(){
   document.getElementById('scoreDisp').textContent=score;
   document.getElementById('comboDisp').textContent=combo;
+  // แสดงสถานะ grab
+  const gs = document.getElementById('grabStatus');
+  if(!handVisible){
+    gs.style.display='block'; gs.textContent='🖐️ ชี้มือเข้ากล้อง';
+  } else if(heldItem){
+    gs.style.display='block'; gs.textContent=`✊ กำ "${heldItem.item.n}" — เปิดมือเพื่อวาง`;
+    gs.style.color='#34d399';
+  } else if(grabConfirm>0 && grabConfirm<GRAB_FRAMES){
+    gs.style.display='block'; gs.textContent=`✊ กำมือค้างไว้อีกนิด... ${grabConfirm}/${GRAB_FRAMES}`;
+    gs.style.color='#fbbf24';
+  } else {
+    gs.style.display='none';
+  }
 }
 
 function showPop(x,y,text,color){
