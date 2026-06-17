@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>AR แยกขยะ — Hand Gesture</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700;800;900&display=swap" rel="stylesheet">
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0a0a0a;font-family:'Sarabun',sans-serif;overflow:hidden;height:100dvh;width:100vw;color:#fff;user-select:none}
+
+.screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;z-index:10}
+.screen.hidden{display:none}
+
+/* HOME */
+#homeScreen{background:radial-gradient(ellipse at 60% 20%,#1a4731 0%,#0a1a12 60%,#050d08 100%)}
+.home-title{font-size:clamp(26px,7vw,44px);font-weight:900;text-align:center;margin-bottom:6px;
+  background:linear-gradient(135deg,#34d399,#10b981,#059669);-webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  filter:drop-shadow(0 0 20px rgba(52,211,153,.4))}
+.home-sub{font-size:14px;color:#6ee7b7;text-align:center;margin-bottom:28px;opacity:.8;line-height:1.6}
+
+.gesture-guide{display:grid;grid-template-columns:1fr 1fr;gap:10px;width:100%;max-width:340px;margin-bottom:24px}
+.gg-card{background:rgba(255,255,255,.06);border:1px solid rgba(52,211,153,.2);border-radius:16px;padding:14px;text-align:center}
+.gg-card .icon{font-size:32px;margin-bottom:6px}
+.gg-card .lbl{font-size:11px;color:#6ee7b7;font-weight:700}
+.gg-card .desc{font-size:10px;color:rgba(255,255,255,.5);margin-top:3px}
+
+.home-cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;width:100%;max-width:340px;margin-bottom:24px}
+.home-card{background:rgba(255,255,255,.05);border:1px solid rgba(52,211,153,.15);border-radius:14px;padding:12px;text-align:center}
+.home-card .icon{font-size:24px;margin-bottom:4px}
+.home-card .val{font-size:20px;font-weight:900;color:#34d399}
+.home-card .lbl{font-size:10px;color:#6ee7b7;opacity:.7;font-weight:700}
+
+.btn-play{background:linear-gradient(135deg,#10b981,#059669);border:none;color:#fff;
+  font-family:'Sarabun',sans-serif;font-size:19px;font-weight:900;padding:16px 44px;
+  border-radius:100px;cursor:pointer;width:100%;max-width:300px;
+  box-shadow:0 8px 30px rgba(16,185,129,.4),0 4px 0 #047857;transition:transform .15s,box-shadow .15s}
+.btn-play:active{transform:translateY(4px);box-shadow:0 4px 15px rgba(16,185,129,.3),0 0 0 #047857}
+
+.time-row{display:flex;gap:8px;margin-bottom:20px}
+.time-btn{font-size:13px;font-weight:800;padding:8px 18px;border-radius:100px;cursor:pointer;
+  border:2px solid rgba(52,211,153,.3);background:rgba(52,211,153,.08);color:#6ee7b7;
+  font-family:'Sarabun',sans-serif;transition:all .2s}
+.time-btn:active{transform:scale(.95)}
+.time-btn.active{background:rgba(52,211,153,.25);border-color:#34d399;color:#34d399;
+  box-shadow:0 0 12px rgba(52,211,153,.3);transform:scale(1.06)}
+
+/* LOADING */
+#loadingOverlay{position:fixed;inset:0;background:#050d08;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;z-index:999;gap:16px;text-align:center;padding:24px}
+#loadingOverlay.hidden{display:none}
+.load-spin{font-size:52px;animation:spin 1.2s linear infinite}
+.load-bar-wrap{width:260px;height:6px;background:rgba(255,255,255,.1);border-radius:100px;overflow:hidden}
+.load-bar{height:100%;background:linear-gradient(90deg,#10b981,#34d399);border-radius:100px;width:0%;transition:width .4s}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* GAME */
+#gameScreen{padding:0;background:#000}
+#videoEl{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+#gameCanvas{position:absolute;inset:0;width:100%;height:100%}
+
+/* HUD */
+.hud{position:absolute;top:0;left:0;right:0;padding:14px 14px 0;
+  display:flex;align-items:center;justify-content:space-between;z-index:20;pointer-events:none}
+.hud-chip{background:rgba(0,0,0,.55);backdrop-filter:blur(10px);border-radius:20px;padding:7px 14px;
+  font-size:15px;font-weight:900;border:1px solid rgba(255,255,255,.1)}
+.hud-timer{background:rgba(0,0,0,.55);backdrop-filter:blur(10px);border-radius:20px;padding:7px 14px;
+  font-size:18px;font-weight:900;min-width:54px;text-align:center;border:1px solid rgba(255,255,255,.1)}
+.hud-timer.warn{color:#f87171;border-color:rgba(248,113,113,.4);animation:pulse .6s infinite}
+.hud-score{color:#34d399}.hud-combo{color:#fbbf24}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* Bins */
+.bins-row{position:absolute;bottom:0;left:0;right:0;display:flex;z-index:20;pointer-events:none}
+.bin{flex:1;display:flex;flex-direction:column;align-items:center;padding-bottom:max(env(safe-area-inset-bottom,10px),10px);
+  padding-top:10px;border-top:3px solid transparent;backdrop-filter:blur(6px);transition:all .2s}
+.bin.recycle{background:rgba(59,130,246,.22);border-color:rgba(59,130,246,.5)}
+.bin.organic {background:rgba(34,197,94,.22); border-color:rgba(34,197,94,.5)}
+.bin.general {background:rgba(156,163,175,.22);border-color:rgba(156,163,175,.5)}
+.bin.hazard  {background:rgba(239,68,68,.22);  border-color:rgba(239,68,68,.5)}
+.bin.glow{transform:scaleY(1.1);filter:brightness(1.5)}
+.bin-icon{font-size:clamp(20px,5.5vw,32px);line-height:1}
+.bin-label{font-size:clamp(8px,2.2vw,11px);font-weight:700;margin-top:2px;white-space:nowrap}
+.bin.recycle .bin-label{color:#93c5fd}.bin.organic .bin-label{color:#86efac}
+.bin.general .bin-label{color:#d1d5db}.bin.hazard  .bin-label{color:#fca5a5}
+
+/* Cursor hand */
+#handCursor{position:absolute;pointer-events:none;z-index:30;font-size:36px;
+  transform:translate(-50%,-50%);transition:font-size .1s;display:none;
+  filter:drop-shadow(0 2px 8px rgba(0,0,0,.8))}
+
+/* Combo */
+.combo-pop{position:absolute;pointer-events:none;z-index:25;font-size:28px;font-weight:900;
+  text-shadow:0 0 16px currentColor;animation:comboUp .8s forwards;white-space:nowrap}
+@keyframes comboUp{0%{opacity:1;transform:translateY(0) scale(1.2)}100%{opacity:0;transform:translateY(-60px) scale(.9)}}
+
+/* Instruction overlay */
+#instrOverlay{position:absolute;inset:0;z-index:18;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;pointer-events:none;gap:16px;
+  background:rgba(0,0,0,.45);backdrop-filter:blur(4px)}
+#instrOverlay.hidden{display:none}
+.instr-card{background:rgba(0,0,0,.6);border:1px solid rgba(52,211,153,.3);border-radius:20px;
+  padding:20px 28px;text-align:center;max-width:280px}
+.instr-card h3{font-size:18px;font-weight:900;color:#34d399;margin-bottom:10px}
+.instr-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;text-align:left}
+.instr-row .ig{font-size:26px;width:36px;text-align:center}
+.instr-row .it{font-size:13px;color:rgba(255,255,255,.8)}
+
+/* Result */
+#resultScreen{background:radial-gradient(ellipse at 50% 0%,#1a4731 0%,#050d08 100%)}
+.result-emoji{font-size:72px;margin-bottom:8px;filter:drop-shadow(0 0 20px rgba(52,211,153,.6))}
+.result-grade{font-size:60px;font-weight:900;background:linear-gradient(135deg,#fbbf24,#f59e0b);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:4px}
+.result-title{font-size:24px;font-weight:900;color:#34d399;margin-bottom:4px}
+.result-sub  {font-size:14px;color:#6ee7b7;margin-bottom:24px;opacity:.8}
+.result-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:340px;margin-bottom:24px}
+.r-card{background:rgba(255,255,255,.06);border:1px solid rgba(52,211,153,.12);border-radius:14px;padding:14px 6px;text-align:center}
+.r-card .ri{font-size:22px;margin-bottom:3px}.r-card .rv{font-size:20px;font-weight:900;color:#34d399}.r-card .rl{font-size:9px;color:#6ee7b7;opacity:.7;font-weight:700}
+.result-btns{display:flex;gap:10px;width:100%;max-width:300px}
+.btn-retry{flex:1;background:linear-gradient(135deg,#10b981,#059669);border:none;color:#fff;
+  font-family:'Sarabun',sans-serif;font-size:16px;font-weight:900;padding:15px;border-radius:18px;
+  cursor:pointer;box-shadow:0 4px 0 #047857;transition:transform .15s,box-shadow .15s}
+.btn-retry:active{transform:translateY(4px);box-shadow:none}
+.btn-home2{flex:1;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:#fff;
+  font-family:'Sarabun',sans-serif;font-size:15px;font-weight:700;padding:15px;border-radius:18px;cursor:pointer}
+
+.btn-back{position:fixed;top:14px;left:14px;z-index:100;background:rgba(0,0,0,.5);
+  border:1px solid rgba(255,255,255,.15);color:#fff;font-size:13px;font-weight:700;
+  font-family:'Sarabun',sans-serif;padding:8px 14px;border-radius:100px;cursor:pointer;backdrop-filter:blur(8px)}
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loadingOverlay">
+  <div class="load-spin">🌿</div>
+  <div style="font-size:16px;font-weight:700;color:#34d399">กำลังโหลด Hand Tracking...</div>
+  <div class="load-bar-wrap"><div class="load-bar" id="loadBar"></div></div>
+  <div style="font-size:12px;color:rgba(255,255,255,.4)" id="loadMsg">โหลด MediaPipe Hands...</div>
+</div>
+
+<!-- HOME -->
+<div id="homeScreen" class="screen hidden">
+  <div style="font-size:64px;margin-bottom:6px;filter:drop-shadow(0 0 20px rgba(52,211,153,.5))">🤚</div>
+  <div class="home-title">AR แยกขยะด้วยมือ</div>
+  <div class="home-sub">ใช้มือจริงในอากาศ — ไม่ต้องแตะจอ!<br>กำมือหยิบขยะ เปิดมือวางลงถัง</div>
+
+  <div class="gesture-guide">
+    <div class="gg-card"><div class="icon">✊</div><div class="lbl">กำมือ</div><div class="desc">หยิบขยะ</div></div>
+    <div class="gg-card"><div class="icon">🖐️</div><div class="lbl">เปิดมือ</div><div class="desc">วางลงถัง</div></div>
+    <div class="gg-card"><div class="icon">👆</div><div class="lbl">ชี้นิ้ว</div><div class="desc">เลื่อน cursor</div></div>
+    <div class="gg-card"><div class="icon">🏃</div><div class="lbl">เร็วๆ</div><div class="desc">คะแนนโบนัส</div></div>
+  </div>
+
+  <div class="home-cards">
+    <div class="home-card"><div class="icon">🏆</div><div class="val" id="bestScore">0</div><div class="lbl">สถิติสูงสุด</div></div>
+    <div class="home-card"><div class="icon">🎮</div><div class="val" id="gamesPlayed">0</div><div class="lbl">รอบที่เล่น</div></div>
+  </div>
+
+  <div style="margin-bottom:8px;font-size:13px;font-weight:700;color:#6ee7b7;opacity:.8;">⏱️ เลือกเวลา</div>
+  <div class="time-row" id="timeRow">
+    <button class="time-btn" data-t="30"  onclick="setTime(30)">30 วิ</button>
+    <button class="time-btn active" data-t="60"  onclick="setTime(60)">60 วิ</button>
+    <button class="time-btn" data-t="90"  onclick="setTime(90)">90 วิ</button>
+    <button class="time-btn" data-t="120" onclick="setTime(120)">2 นาที</button>
+  </div>
+
+  <button class="btn-play" onclick="startGame()">🤚 เริ่มเกม</button>
+  <a href="index.html" style="margin-top:16px;font-size:12px;color:#34d399;opacity:.5;text-decoration:none;font-weight:700">← กลับหน้าหลัก</a>
+</div>
+
+<!-- GAME -->
+<div id="gameScreen" class="screen hidden">
+  <video id="videoEl" autoplay playsinline muted></video>
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- Hand cursor -->
+  <div id="handCursor">🤚</div>
+
+  <!-- Instruction overlay (3s) -->
+  <div id="instrOverlay">
+    <div class="instr-card">
+      <h3>🤚 วิธีเล่น</h3>
+      <div class="instr-row"><div class="ig">✊</div><div class="it"><b>กำมือ</b> เพื่อหยิบขยะที่ cursor อยู่</div></div>
+      <div class="instr-row"><div class="ig">🖐️</div><div class="it"><b>เปิดมือ</b> เพื่อวางขยะลงถัง</div></div>
+      <div class="instr-row"><div class="ig">📐</div><div class="it">เคลื่อนมือในอากาศเพื่อเลื่อน cursor</div></div>
+    </div>
+    <div style="font-size:13px;color:rgba(255,255,255,.5)">เกมจะเริ่มใน <span id="instrCount">3</span> วินาที...</div>
+  </div>
+
+  <!-- HUD -->
+  <div class="hud">
+    <div class="hud-chip hud-score">⭐ <span id="scoreDisp">0</span></div>
+    <div class="hud-timer" id="timerDisp">30</div>
+    <div class="hud-chip hud-combo">🔥 <span id="comboDisp">0</span></div>
+  </div>
+
+  <!-- Combo area -->
+  <div id="comboArea" style="position:absolute;top:70px;left:0;right:0;pointer-events:none;z-index:25;height:50px"></div>
+
+  <!-- Bins -->
+  <div class="bins-row">
+    <div class="bin recycle" id="bR"><div class="bin-icon">♻️</div><div class="bin-label">รีไซเคิล</div></div>
+    <div class="bin organic"  id="bO"><div class="bin-icon">🍃</div><div class="bin-label">เศษอาหาร</div></div>
+    <div class="bin general"  id="bG"><div class="bin-icon">🗑️</div><div class="bin-label">ทั่วไป</div></div>
+    <div class="bin hazard"   id="bH"><div class="bin-icon">⚠️</div><div class="bin-label">อันตราย</div></div>
+  </div>
+
+  <button class="btn-back" onclick="endGame()">✕</button>
+  <button onclick="showSkeleton=!showSkeleton" id="skelBtn"
+          style="position:fixed;top:14px;right:14px;z-index:100;background:rgba(0,0,0,.5);
+                 border:1px solid rgba(255,255,255,.2);color:#fff;font-size:12px;font-weight:700;
+                 font-family:'Sarabun',sans-serif;padding:7px 12px;border-radius:100px;cursor:pointer;
+                 backdrop-filter:blur(8px)">
+    🖐️ Skeleton
+  </button>
+</div>
+
+<!-- RESULT -->
+<div id="resultScreen" class="screen hidden">
+  <div class="result-emoji" id="rEmoji">🏆</div>
+  <div class="result-grade" id="rGrade">S</div>
+  <div class="result-title" id="rTitle">ยอดเยี่ยม!</div>
+  <div class="result-sub"   id="rSub">คุณแยกขยะด้วยมือเก่งมาก!</div>
+  <div class="result-grid">
+    <div class="r-card"><div class="ri">⭐</div><div class="rv" id="rScore">0</div><div class="rl">คะแนน</div></div>
+    <div class="r-card"><div class="ri">✅</div><div class="rv" id="rOk">0</div><div class="rl">ถูก</div></div>
+    <div class="r-card"><div class="ri">❌</div><div class="rv" id="rFail">0</div><div class="rl">ผิด</div></div>
+    <div class="r-card"><div class="ri">🔥</div><div class="rv" id="rCombo">0</div><div class="rl">Combo</div></div>
+    <div class="r-card"><div class="ri">⏱️</div><div class="rv" id="rTime">0</div><div class="rl">วินาที</div></div>
+    <div class="r-card"><div class="ri">🏆</div><div class="rv" id="rBest">0</div><div class="rl">สถิติ</div></div>
+  </div>
+  <div class="result-btns">
+    <button class="btn-retry" onclick="startGame()">🔄 เล่นอีกครั้ง</button>
+    <button class="btn-home2" onclick="showHome()">🏠 หน้าแรก</button>
+  </div>
+</div>
+
+<script>
+// ================================================================
+// DATA
+// ================================================================
+const ITEMS = [
+  {e:'🍾',n:'ขวดแก้ว',      b:'recycle'},{e:'🧴',n:'ขวดพลาสติก', b:'recycle'},
+  {e:'🥫',n:'กระป๋อง',      b:'recycle'},{e:'📰',n:'หนังสือพิมพ์',b:'recycle'},
+  {e:'📦',n:'กล่องกระดาษ',  b:'recycle'},{e:'🥤',n:'แก้วพลาสติก', b:'recycle'},
+  {e:'🍌',n:'เปลือกกล้วย',  b:'organic'},{e:'🍎',n:'แกนแอปเปิล', b:'organic'},
+  {e:'🥦',n:'เศษผัก',       b:'organic'},{e:'🍚',n:'ข้าวเหลือ',   b:'organic'},
+  {e:'☕',n:'กากกาแฟ',      b:'organic'},{e:'🌿',n:'ใบไม้แห้ง',   b:'organic'},
+  {e:'🧻',n:'กระดาษทิชชู่', b:'general'},{e:'✏️',n:'ดินสอหัก',    b:'general'},
+  {e:'👟',n:'รองเท้าเก่า',   b:'general'},{e:'🧤',n:'ถุงมือยาง',   b:'general'},
+  {e:'🔋',n:'แบตเตอรี่',    b:'hazard'}, {e:'💡',n:'หลอดไฟ',      b:'hazard'},
+  {e:'🧪',n:'ขวดสารเคมี',   b:'hazard'}, {e:'🩺',n:'เข็มฉีดยา',   b:'hazard'},
+];
+const GAME_CONFIG = { max:2, rate:2000, spd:.75 };
+const TIME_OPTIONS = [30, 60, 90, 120];
+const BIN_IDS = {recycle:'bR',organic:'bO',general:'bG',hazard:'bH'};
+
+// ================================================================
+// STATE
+// ================================================================
+let gameTime  = 60;  // วินาที
+let stats     = JSON.parse(localStorage.getItem('arStats')||'{"best":0,"played":0}');
+let gameItems = [], score=0, timeLeft=0, combo=0, bestCombo=0, ok=0, fail=0;
+let timerInt=null, spawnInt=null, animId=null, gameRunning=false, startTime=0;
+let nextId    = 0;
+
+// Hand state
+let handX = -999, handY = -999;   // normalized 0-1
+let handLandmarks = null;         // เก็บ landmarks ทั้ง 21 จุด
+let isGrabbing   = false;         // fist = true
+let wasGrabbing  = false;
+let heldItem     = null;          // item currently held by hand
+let handVisible  = false;
+let showSkeleton = true;          // toggle แสดง skeleton
+
+const canvas = document.getElementById('gameCanvas');
+const ctx    = canvas.getContext('2d');
+const video  = document.getElementById('videoEl');
+const cursor = document.getElementById('handCursor');
+
+// ================================================================
+// SCREENS
+// ================================================================
+function show(id){['homeScreen','gameScreen','resultScreen'].forEach(s=>document.getElementById(s).classList.add('hidden'));document.getElementById(id).classList.remove('hidden')}
+function showHome(){stopGame();updateStats();show('homeScreen')}
+function updateStats(){document.getElementById('bestScore').textContent=stats.best;document.getElementById('gamesPlayed').textContent=stats.played}
+function setTime(t){
+  gameTime=t;
+  document.querySelectorAll('.time-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelector(`.time-btn[data-t="${t}"]`).classList.add('active');
+}
+
+// ================================================================
+// MEDIAPIPE SETUP
+// ================================================================
+let hands, camera;
+
+async function initMediaPipe(){
+  setLoad(10,'โหลด Hands model...');
+  hands = new Hands({locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+  hands.setOptions({
+    maxNumHands:1,
+    modelComplexity:0,        // 0=fast, 1=accurate
+    minDetectionConfidence:.7,
+    minTrackingConfidence:.6,
+  });
+  hands.onResults(onHandResults);
+  setLoad(60,'เริ่มกล้อง...');
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}},audio:false});
+    video.srcObject = stream;
+    await video.play();
+    setLoad(80,'เชื่อมต่อ Hand Tracking...');
+
+    camera = new Camera(video,{
+      onFrame: async()=>{ await hands.send({image:video}); },
+      width:640, height:480,
+    });
+    await camera.start();
+    setLoad(100,'พร้อมแล้ว!');
+    setTimeout(()=>{
+      document.getElementById('loadingOverlay').classList.add('hidden');
+      updateStats();
+      show('homeScreen');
+    },600);
+  } catch(err){
+    document.getElementById('loadMsg').textContent = 'ไม่สามารถเปิดกล้องได้: '+err.message;
+    setTimeout(()=>{
+      document.getElementById('loadingOverlay').classList.add('hidden');
+      show('homeScreen');
+    },2000);
+  }
+}
+
+function setLoad(pct,msg){
+  document.getElementById('loadBar').style.width=pct+'%';
+  document.getElementById('loadMsg').textContent=msg;
+}
+
+// ================================================================
+// HAND RESULTS — MediaPipe callback
+// ================================================================
+function onHandResults(results){
+  if(!results.multiHandLandmarks || results.multiHandLandmarks.length===0){
+    handVisible=false; handLandmarks=null; cursor.style.display='none';
+    if(heldItem){heldItem=null;}
+    return;
+  }
+  handVisible   = true;
+  const lm      = results.multiHandLandmarks[0];
+  handLandmarks = lm;   // เก็บไว้วาด skeleton
+
+  // ใช้ landmark 9 (กลางมือ) เป็น cursor position
+  // x ต้อง flip (1-x) เพราะ video ถูก mirror ด้วย CSS scaleX(-1)
+  const palm = lm[9];
+  handX = 1 - palm.x;
+  handY = palm.y;
+
+  // ตรวจ gesture: กำมือ vs เปิดมือ
+  isGrabbing = detectFist(lm);
+
+  // อัปเดต cursor DOM
+  const cx = handX * canvas.width;
+  const cy = handY * canvas.height;
+  cursor.style.left  = cx+'px';
+  cursor.style.top   = cy+'px';
+  cursor.style.display = 'block';
+  cursor.textContent = isGrabbing ? '✊' : '🤚';
+  cursor.style.fontSize = isGrabbing ? '44px' : '36px';
+}
+
+// ตรวจว่ากำมือไหม: ใช้ระยะห่างระหว่างปลายนิ้วกับโคนนิ้ว
+function detectFist(lm){
+  // landmark: 4=หัวแม่มือ, 8=นิ้วชี้, 12=นิ้วกลาง, 16=นิ้วนาง, 20=ก้อย
+  // โคนนิ้ว: 2,5,9,13,17
+  const tips = [8,12,16,20];
+  const bases= [5,9,13,17];
+  let curled = 0;
+  tips.forEach((t,i)=>{
+    const tip  = lm[t];
+    const base = lm[bases[i]];
+    const wrist= lm[0];
+    // ถ้าปลายนิ้วใกล้ข้อมือกว่าโคนนิ้ว = นิ้วงอ (curl)
+    const dTip  = dist(tip,  wrist);
+    const dBase = dist(base, wrist);
+    if(dTip < dBase * 0.85) curled++;
+  });
+  return curled >= 3; // อย่างน้อย 3 นิ้วงอ = กำมือ
+}
+function dist(a,b){return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2)}
+
+// ================================================================
+// GAME
+// ================================================================
+function resizeCanvas(){canvas.width=window.innerWidth;canvas.height=window.innerHeight}
+window.addEventListener('resize',resizeCanvas);
+
+async function startGame(){
+  resizeCanvas();
+  show('gameScreen');
+
+  // Instruction countdown
+  const instrEl = document.getElementById('instrOverlay');
+  const countEl = document.getElementById('instrCount');
+  instrEl.classList.remove('hidden');
+  for(let i=3;i>=1;i--){
+    countEl.textContent=i;
+    await sleep(1000);
+  }
+  instrEl.classList.add('hidden');
+
+  const cfg = GAME_CONFIG;
+  score=0; timeLeft=gameTime; combo=0; bestCombo=0; ok=0; fail=0;
+  gameItems=[]; heldItem=null; gameRunning=true; startTime=Date.now();
+  updateHUD();
+
+  spawnInt = setInterval(spawnItem, cfg.rate);
+  spawnItem();
+
+  timerInt = setInterval(()=>{
+    if(!gameRunning)return;
+    timeLeft--;
+    const el=document.getElementById('timerDisp');
+    el.textContent=timeLeft;
+    el.className='hud-timer'+(timeLeft<=10?' warn':'');
+    if(timeLeft<=0) endGame();
+  },1000);
+
+  animId = requestAnimationFrame(loop);
+}
+
+function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
+
+function stopGame(){
+  gameRunning=false;
+  clearInterval(timerInt); clearInterval(spawnInt);
+  cancelAnimationFrame(animId);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  heldItem=null;
+}
+
+function endGame(){
+  gameRunning=false;
+  clearInterval(timerInt); clearInterval(spawnInt);
+  cancelAnimationFrame(animId);
+
+  const elapsed=Math.round((Date.now()-startTime)/1000);
+  stats.played++;
+  if(score>stats.best) stats.best=score;
+  localStorage.setItem('arStats',JSON.stringify(stats));
+
+  const acc = ok+fail>0 ? ok/(ok+fail) : 0;
+  let grade,emoji,title,sub;
+  if(acc>=.9&&score>=80)     {grade='S';emoji='🏆';title='ยอดเยี่ยมมาก!';       sub='Hand Gesture เก่งมาก!'}
+  else if(acc>=.8&&score>=50){grade='A';emoji='🌟';title='ดีมาก!';              sub='ใช้มือได้คล่องแคล่ว'}
+  else if(acc>=.65)          {grade='B';emoji='😊';title='ผ่านแล้ว!';            sub='ฝึกท่ามืออีกนิดนะ'}
+  else if(acc>=.5)           {grade='C';emoji='💪';title='พยายามต่อไป!';         sub='ลองปรับ lighting ดูนะ'}
+  else                       {grade='D';emoji='📚';title='ลองใหม่นะครับ!';       sub='แสงดี + มือชัดจะช่วยได้'}
+
+  document.getElementById('rEmoji').textContent=emoji;
+  document.getElementById('rGrade').textContent=grade;
+  document.getElementById('rTitle').textContent=title;
+  document.getElementById('rSub').textContent=sub;
+  document.getElementById('rScore').textContent=score;
+  document.getElementById('rOk').textContent=ok;
+  document.getElementById('rFail').textContent=fail;
+  document.getElementById('rCombo').textContent=bestCombo;
+  document.getElementById('rTime').textContent=elapsed;
+  document.getElementById('rBest').textContent=stats.best;
+  show('resultScreen');
+  updateStats();
+}
+
+// ================================================================
+// SPAWN
+// ================================================================
+function spawnItem(){
+  if(!gameRunning) return;
+  const cfg=GAME_CONFIG;
+  const active=gameItems.filter(i=>!i.removing).length;
+  if(active>=cfg.max) return;
+
+  const item=ITEMS[Math.floor(Math.random()*ITEMS.length)];
+  const margin=70;
+  gameItems.push({
+    id:nextId++, item,
+    x: margin+Math.random()*(canvas.width-margin*2),
+    y: -70,
+    vy:(1.3+Math.random()*.8)*GAME_CONFIG.spd,
+    vx:(Math.random()-.5)*1.2,
+    scale:1, opacity:1,
+    removing:false,
+    wobble:Math.random()*Math.PI*2,
+    held:false,
+    _done:false,
+  });
+}
+
+// ================================================================
+// GAME LOOP
+// ================================================================
+function loop(){
+  if(!gameRunning)return;
+  animId=requestAnimationFrame(loop);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  const CX = handX * canvas.width;
+  const CY = handY * canvas.height;
+  const BIN_Y = canvas.height - 85;
+
+  // --- Grab / Release logic ---
+  if(handVisible){
+    if(isGrabbing && !wasGrabbing){
+      // กำมือ: หยิบ item ที่อยู่ใกล้ cursor
+      if(!heldItem){
+        const HIT = Math.max(60, canvas.width*.1);
+        const hit = [...gameItems].reverse().find(gi=>{
+          if(gi.removing||gi.held) return false;
+          return Math.hypot(gi.x-CX, gi.y-CY)<HIT;
+        });
+        if(hit){ heldItem=hit; hit.held=true; }
+      }
+    }
+    if(!isGrabbing && wasGrabbing){
+      // เปิดมือ: วาง item
+      if(heldItem){
+        const bin=getBinAt(CX,CY,BIN_Y);
+        if(bin) dropItem(heldItem,bin);
+        else    releaseItem(heldItem);
+        heldItem=null;
+      }
+    }
+    wasGrabbing=isGrabbing;
+  }
+
+  // --- Move held item ---
+  if(heldItem && handVisible){
+    heldItem.x += (CX - heldItem.x) * .4;
+    heldItem.y += (CY-30 - heldItem.y) * .4;
+    heldItem.vy=0; heldItem.vx=0;
+  }
+
+  // --- Update items ---
+  gameItems.forEach(gi=>{
+    gi.wobble+=.04;
+    if(!gi.held && !gi.removing){
+      gi.x+=gi.vx; gi.y+=gi.vy;
+      if(gi.x<40){gi.x=40;gi.vx=Math.abs(gi.vx)}
+      if(gi.x>canvas.width-40){gi.x=canvas.width-40;gi.vx=-Math.abs(gi.vx)}
+      if(gi.y>BIN_Y+15) missItem(gi);
+    }
+    if(gi.removing){
+      gi.scale+=.07; gi.opacity-=.07;
+      if(gi.opacity<=0) gi._done=true;
+    }
+    if(!gi._done) drawItem(gi,CX,CY);
+  });
+  gameItems=gameItems.filter(g=>!g._done);
+
+  // --- Draw hand trail ---
+  if(handVisible){
+    drawHandIndicator(CX,CY);
+  }
+
+  // --- Bin highlights ---
+  ['bR','bO','bG','bH'].forEach(id=>document.getElementById(id).classList.remove('glow'));
+  if(heldItem && handVisible){
+    const nearBin=getBinAt(CX,CY,BIN_Y);
+    if(nearBin) document.getElementById(BIN_IDS[nearBin]).classList.add('glow');
+    // Draw drop arrow
+    if(nearBin){
+      const bi=['recycle','organic','general','hazard'].indexOf(nearBin);
+      const ax=canvas.width/4*bi + canvas.width/8;
+      ctx.save();
+      ctx.font='28px serif';
+      ctx.textAlign='center';
+      ctx.globalAlpha=.85;
+      ctx.fillText('⬇️',ax,BIN_Y-8);
+      ctx.restore();
+    }
+  }
+
+  updateHUD();
+}
+
+function drawItem(gi,cx,cy){
+  const S=52*gi.scale;
+  const wobX=Math.sin(gi.wobble)*(gi.held?1.5:3.5);
+  const isNear=Math.hypot(gi.x-cx,gi.y-cy)<80 && !gi.held;
+
+  ctx.save();
+  ctx.globalAlpha=gi.opacity;
+  ctx.translate(gi.x+wobX, gi.y);
+
+  // glow
+  ctx.shadowColor = gi.held ? '#34d399' : isNear ? gi.item.color || '#fff' : 'rgba(0,0,0,.4)';
+  ctx.shadowBlur  = gi.held ? 24 : isNear ? 16 : 10;
+  ctx.shadowOffsetY=3;
+
+  // circle bg
+  ctx.beginPath();
+  ctx.arc(0,0,S*.65,0,Math.PI*2);
+  ctx.fillStyle=gi.held?'rgba(52,211,153,.3)':'rgba(0,0,0,.38)';
+  ctx.fill();
+
+  if(gi.held){
+    ctx.strokeStyle='#34d399'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(0,0,S*.65+4,0,Math.PI*2); ctx.stroke();
+  }
+
+  // emoji
+  ctx.shadowBlur=0; ctx.shadowOffsetY=0;
+  const ES = gi.held ? S*1.25 : S;
+  ctx.font=`${ES}px serif`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(gi.item.e,0,2);
+
+  // label
+  if(gi.scale<=1.1){
+    ctx.font=`bold ${Math.round(11*gi.scale)}px Sarabun,sans-serif`;
+    ctx.fillStyle='rgba(255,255,255,.88)';
+    ctx.shadowColor='rgba(0,0,0,.9)'; ctx.shadowBlur=4;
+    ctx.fillText(gi.item.n,0,S*.72);
+  }
+  ctx.restore();
+}
+
+// MediaPipe Hands connection topology
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],         // นิ้วหัวแม่มือ
+  [0,5],[5,6],[6,7],[7,8],         // นิ้วชี้
+  [5,9],[9,10],[10,11],[11,12],    // นิ้วกลาง
+  [9,13],[13,14],[14,15],[15,16],  // นิ้วนาง
+  [13,17],[17,18],[18,19],[19,20], // นิ้วก้อย
+  [0,17],[0,5],[5,9],[9,13],       // ฝ่ามือ
+];
+
+// กลุ่มสีตามนิ้ว
+const FINGER_COLORS = {
+  thumb:  '#f472b6',  // ชมพู
+  index:  '#34d399',  // เขียว
+  middle: '#60a5fa',  // ฟ้า
+  ring:   '#a78bfa',  // ม่วง
+  pinky:  '#fbbf24',  // เหลือง
+  palm:   '#ffffff',  // ขาว
+};
+
+function getLandmarkColor(idx){
+  if(idx>=1&&idx<=4)   return FINGER_COLORS.thumb;
+  if(idx>=5&&idx<=8)   return FINGER_COLORS.index;
+  if(idx>=9&&idx<=12)  return FINGER_COLORS.middle;
+  if(idx>=13&&idx<=16) return FINGER_COLORS.ring;
+  if(idx>=17&&idx<=20) return FINGER_COLORS.pinky;
+  return FINGER_COLORS.palm;
+}
+
+function lmToCanvas(lm){
+  // x ต้อง flip เพราะวิดีโอ mirror แล้ว
+  return { x:(1-lm.x)*canvas.width, y:lm.y*canvas.height };
+}
+
+function drawHandSkeleton(){
+  if(!handVisible || !handLandmarks || !showSkeleton) return;
+  const lm = handLandmarks;
+  const pts = lm.map(lmToCanvas);
+  const alpha = isGrabbing ? 0.9 : 0.75;
+
+  ctx.save();
+
+  // วาดเส้นเชื่อม (connections)
+  HAND_CONNECTIONS.forEach(([a,b])=>{
+    const pa=pts[a], pb=pts[b];
+    ctx.beginPath();
+    ctx.moveTo(pa.x,pa.y);
+    ctx.lineTo(pb.x,pb.y);
+    ctx.strokeStyle=`rgba(255,255,255,${alpha*0.5})`;
+    ctx.lineWidth=isGrabbing?3:2;
+    ctx.lineCap='round';
+    ctx.stroke();
+  });
+
+  // วาด dots ที่แต่ละ landmark
+  pts.forEach((p,i)=>{
+    const color=getLandmarkColor(i);
+    const r = i===0 ? 8 : (i%4===0 && i!==0) ? 7 : 5; // ข้อมือและปลายนิ้วใหญ่กว่า
+
+    // outer glow
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,r+3,0,Math.PI*2);
+    ctx.fillStyle=`rgba(0,0,0,${alpha*0.5})`;
+    ctx.fill();
+
+    // dot
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,r,0,Math.PI*2);
+    ctx.fillStyle=color;
+    ctx.globalAlpha=alpha;
+    ctx.fill();
+
+    // white center
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,r*0.4,0,Math.PI*2);
+    ctx.fillStyle='rgba(255,255,255,0.9)';
+    ctx.fill();
+  });
+
+  // pulse ring รอบฝ่ามือเมื่อกำมือ
+  if(isGrabbing){
+    const palm=pts[9];
+    const t=Date.now()/400;
+    const pulse=Math.sin(t)*8+32;
+    ctx.globalAlpha=0.35-Math.sin(t)*0.15;
+    ctx.beginPath();
+    ctx.arc(palm.x,palm.y,pulse,0,Math.PI*2);
+    ctx.strokeStyle='#34d399';
+    ctx.lineWidth=2.5;
+    ctx.stroke();
+
+    // label "กำมือ" / "GRAB"
+    ctx.globalAlpha=0.85;
+    ctx.font='bold 13px Sarabun,sans-serif';
+    ctx.fillStyle='#34d399';
+    ctx.textAlign='center';
+    ctx.shadowColor='rgba(0,0,0,0.8)';
+    ctx.shadowBlur=6;
+    ctx.fillText('✊ กำมือแล้ว', palm.x, palm.y-48);
+  }
+
+  ctx.restore();
+}
+
+// ยังคง drawHandIndicator แต่ตอนนี้ซ่อน DOM cursor เพราะใช้ canvas skeleton แทน
+function drawHandIndicator(cx,cy){
+  drawHandSkeleton();
+  // ซ่อน DOM cursor เมื่อวาด skeleton บน canvas แล้ว
+  cursor.style.display='none';
+}
+
+// ================================================================
+// BIN DETECTION
+// ================================================================
+function getBinAt(x,y,binY){
+  if(y<binY-70) return null;
+  const w4=canvas.width/4;
+  if(x<w4)     return 'recycle';
+  if(x<w4*2)   return 'organic';
+  if(x<w4*3)   return 'general';
+  return 'hazard';
+}
+
+function dropItem(gi,binName){
+  gi.held=false; gi.removing=true;
+  if(heldItem===gi) heldItem=null;
+  const correct=gi.item.b===binName;
+  if(correct){
+    combo++; ok++;
+    if(combo>bestCombo) bestCombo=combo;
+    const pts=10+(combo>1?(combo-1)*3:0);
+    score+=pts;
+    showPop(gi.x,gi.y,combo>=3?`🔥 COMBO x${combo}! +${pts}`:`✅ +${pts}`, combo>=3?'#fbbf24':'#34d399');
+  } else {
+    fail++; combo=0;
+    score=Math.max(0,score-5);
+    showPop(gi.x,gi.y,'❌ ผิด -5','#f87171');
+  }
+}
+
+function releaseItem(gi){
+  gi.held=false;
+  gi.vy=GAME_CONFIG.spd*1.8;
+  gi.vx=(Math.random()-.5)*2;
+}
+
+function missItem(gi){
+  gi.removing=true; gi.held=false;
+  if(heldItem===gi) heldItem=null;
+  fail++; combo=0; score=Math.max(0,score-3);
+  showPop(gi.x,gi.y,'💨 พลาด','rgba(255,255,255,.5)');
+}
+
+// ================================================================
+// UI HELPERS
+// ================================================================
+function updateHUD(){
+  document.getElementById('scoreDisp').textContent=score;
+  document.getElementById('comboDisp').textContent=combo;
+}
+
+function showPop(x,y,text,color){
+  const el=document.createElement('div');
+  el.className='combo-pop';
+  el.style.color=color;
+  el.style.left=Math.min(Math.max(x,60),canvas.width-60)+'px';
+  el.style.top =Math.max(y-20,60)+'px';
+  el.textContent=text;
+  document.getElementById('comboArea').appendChild(el);
+  setTimeout(()=>el.remove(),900);
+}
+
+// ================================================================
+// INIT
+// ================================================================
+window.addEventListener('load',()=>{ resizeCanvas(); initMediaPipe(); });
+</script>
+</body>
+</html>
