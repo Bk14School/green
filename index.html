@@ -2573,7 +2573,7 @@
         else if (newVal === 'rewards') this.loadRewardItems();
       }
     },
-    mounted() {
+mounted() {
       this.isDark = localStorage.getItem('theme') === 'dark' ||
                     (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
       document.documentElement.classList.toggle('dark', this.isDark);
@@ -2581,7 +2581,9 @@
       const savedTeacher = sessionStorage.getItem('currentTeacher');
       if (savedTeacher) { this.teacher = JSON.parse(savedTeacher); }
 
-      this.settings.googleScriptUrl = localStorage.getItem('googleScriptUrl') || '';
+      // 🟢 แก้ไขบรรทัดนี้: ให้ดึงค่า API_URL ด้านบนมาใช้เป็นค่าเริ่มต้นเสมอ
+      this.settings.googleScriptUrl = localStorage.getItem('googleScriptUrl') || API_URL;
+
       this.loadData();
       this.loadDailyFact();
 
