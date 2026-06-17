@@ -415,10 +415,11 @@ function dist(a,b){return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2)}
 // GAME
 // ================================================================
 function resizeCanvas(){canvas.width=window.innerWidth;canvas.height=window.innerHeight}
-window.addEventListener('resize',resizeCanvas);
+// resize จัดการใน getBinAt block แล้ว
 
 async function startGame(){
   resizeCanvas();
+  setTimeout(updateBinRects, 100); // รอให้ DOM render เสร็จก่อน
   show('gameScreen');
 
   // Instruction countdown
@@ -588,7 +589,8 @@ function loop(){
       gi.x+=gi.vx; gi.y+=gi.vy;
       if(gi.x<40){gi.x=40;gi.vx=Math.abs(gi.vx)}
       if(gi.x>canvas.width-40){gi.x=canvas.width-40;gi.vx=-Math.abs(gi.vx)}
-      if(gi.y>BIN_Y+15) missItem(gi);
+      // ถ้าตกลงถึงด้านล่างโดยไม่ถูกจับ
+      if(gi.y > canvas.height * 0.82) missItem(gi);
     }
     if(gi.removing){
       gi.scale+=.07; gi.opacity-=.07;
@@ -606,18 +608,29 @@ function loop(){
   // --- Bin highlights ---
   ['bR','bO','bG','bH'].forEach(id=>document.getElementById(id).classList.remove('glow'));
   if(heldItem && handVisible){
-    const nearBin=getBinAt(CX,CY,BIN_Y);
-    if(nearBin) document.getElementById(BIN_IDS[nearBin]).classList.add('glow');
-    // Draw drop arrow
+    const nearBin = getBinAt(CX, CY, BIN_Y);
     if(nearBin){
-      const bi=['recycle','organic','general','hazard'].indexOf(nearBin);
-      const ax=canvas.width/4*bi + canvas.width/8;
-      ctx.save();
-      ctx.font='28px serif';
-      ctx.textAlign='center';
-      ctx.globalAlpha=.85;
-      ctx.fillText('⬇️',ax,BIN_Y-8);
-      ctx.restore();
+      document.getElementById(BIN_IDS[nearBin]).classList.add('glow');
+      // วาดลูกศรชี้ถังที่ตรวจจากตำแหน่งจริง
+      const r = binRects[nearBin];
+      if(r){
+        ctx.save();
+        ctx.globalAlpha = 0.9;
+        ctx.font = '28px serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('⬇️', r.cx, r.y - 8);
+        // วาดเส้นจาก item ถึงถัง
+        ctx.globalAlpha = 0.25;
+        ctx.beginPath();
+        ctx.moveTo(heldItem.x, heldItem.y + 30);
+        ctx.lineTo(r.cx, r.y);
+        ctx.strokeStyle = '#34d399';
+        ctx.lineWidth   = 2;
+        ctx.setLineDash([6,4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
     }
   }
 
@@ -780,14 +793,45 @@ function drawHandIndicator(cx,cy){
 // ================================================================
 // BIN DETECTION
 // ================================================================
-function getBinAt(x,y,binY){
-  if(y<binY-70) return null;
-  const w4=canvas.width/4;
-  if(x<w4)     return 'recycle';
-  if(x<w4*2)   return 'organic';
-  if(x<w4*3)   return 'general';
-  return 'hazard';
+// cache bin rects (อัปเดตเมื่อ resize)
+let binRects = {};
+function updateBinRects(){
+  const ids = {recycle:'bR', organic:'bO', general:'bG', hazard:'bH'};
+  const canvasRect = canvas.getBoundingClientRect();
+  Object.entries(ids).forEach(([name,id])=>{
+    const el   = document.getElementById(id);
+    const rect = el.getBoundingClientRect();
+    // แปลงเป็น canvas coordinate
+    const scaleX = canvas.width  / canvasRect.width;
+    const scaleY = canvas.height / canvasRect.height;
+    binRects[name] = {
+      x:     (rect.left   - canvasRect.left) * scaleX,
+      y:     (rect.top    - canvasRect.top)  * scaleY,
+      right: (rect.right  - canvasRect.left) * scaleX,
+      bottom:(rect.bottom - canvasRect.top)  * scaleY,
+      cx:    (rect.left + rect.width/2  - canvasRect.left) * scaleX,
+      cy:    (rect.top  + rect.height/2 - canvasRect.top)  * scaleY,
+    };
+  });
 }
+
+function getBinAt(x, y, _unused){
+  // ขยาย zone ขึ้นมา 120px เหนือถัง
+  const EXPAND_Y = 120;
+  const EXPAND_X = 10;
+  for(const [name, r] of Object.entries(binRects)){
+    if(x >= r.x - EXPAND_X &&
+       x <= r.right + EXPAND_X &&
+       y >= r.y - EXPAND_Y &&
+       y <= r.bottom){
+      return name;
+    }
+  }
+  return null;
+}
+
+// เรียก updateBinRects ตอน resize และตอน start
+window.addEventListener('resize', ()=>{ resizeCanvas(); setTimeout(updateBinRects,50); });
 
 function dropItem(gi,binName){
   gi.held      = false;
@@ -867,7 +911,12 @@ function showPop(x,y,text,color){
 // ================================================================
 // INIT
 // ================================================================
-window.addEventListener('load',()=>{ resizeCanvas(); initMediaPipe(); });
+window.addEventListener('load',()=>{
+  resizeCanvas();
+  initMediaPipe();
+  // อัปเดต bin rects หลัง DOM render
+  setTimeout(updateBinRects, 500);
+});
 </script>
 </body>
 </html>
