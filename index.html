@@ -2081,7 +2081,8 @@
 </div>
 
 <script>
-  
+    // 🟢 1. นำ URL Web App ของคุณมาใส่ที่นี่ครับ
+  const API_URL = "https://script.google.com/macros/s/AKfycbwTqwNdoTohY2NtPhBviJ7e9imOjjkgSM4owh45UkJRZ2ZvLLB-HAeXpqbY471pHU8l/exec";
   const { createApp } = Vue;
 
   createApp({
@@ -2574,7 +2575,7 @@
         else if (newVal === 'rewards') this.loadRewardItems();
       }
     },
-    mounted() {
+mounted() {
       this.isDark = localStorage.getItem('theme') === 'dark' ||
                     (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
       document.documentElement.classList.toggle('dark', this.isDark);
@@ -2582,7 +2583,9 @@
       const savedTeacher = sessionStorage.getItem('currentTeacher');
       if (savedTeacher) { this.teacher = JSON.parse(savedTeacher); }
 
-      this.settings.googleScriptUrl = localStorage.getItem('googleScriptUrl') || '';
+      // 🟢 2. โค้ดส่วนที่เราแก้ไว้ จะทำงานได้ปกติแล้วครับ
+      this.settings.googleScriptUrl = localStorage.getItem('googleScriptUrl') || API_URL;
+
       this.loadData();
       this.loadDailyFact();
 
